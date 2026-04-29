@@ -20,8 +20,21 @@ def is_wall_at_pixel(px: float, py: float) -> bool:
         return True
     
     return WORLD_MAP[my][mx] == "1"
-    
 
+def cast_ray(player_x, player_y, angle):
+    depth = 0
+    step = 2
+    max_depth = 1000
+
+    while depth < max_depth:
+        depth += step
+        ray_x = player_x + math.cos(angle) * depth
+        ray_y = player_y + math.sin(angle) * depth
+
+        if is_wall_at_pixel(ray_x, ray_y) == True:
+            break
+    return ray_x, ray_y
+        
 def collides_circle(px: float, py: float, r: float) -> bool:
     points = [
         (px + r, py),
@@ -140,23 +153,25 @@ def main():
                     pg.draw.rect(screen, (100, 100, 100),
                                  (cell_x, cell_y, TILE_SIZE, TILE_SIZE))
 
-        # рисуем игрока
+        # рисую игрока
         pg.draw.circle(screen, (220, 220, 220), (int(player_x), int(player_y)), PLAYER_RADIUS)
 
         line_length = 40
         dx = line_length * pg.math.Vector2(1, 0).rotate_rad(angle).x
-        dy = line_length * pg.math.Vector2(1, 0).rotate_rad(angle).y
+        dy = line_length * pg.math.Vector2(1, 0).rotate_rad(angle).y 
 
+        ray_x, ray_y = cast_ray(player_x, player_y, angle)
+        
         pg.draw.line(
             screen,
             (255, 50, 50),
             (int(player_x), int(player_y)),
-            (int(player_x + dx), int(player_y + dy)),
+            (int(ray_x), int(ray_y)),
             3
         )
 
         pg.display.flip()
-
+        
     pg.quit()
 
 if __name__ == "__main__":
