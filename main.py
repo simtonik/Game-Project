@@ -160,16 +160,23 @@ def main():
         dx = line_length * pg.math.Vector2(1, 0).rotate_rad(angle).x
         dy = line_length * pg.math.Vector2(1, 0).rotate_rad(angle).y 
 
-        ray_x, ray_y = cast_ray(player_x, player_y, angle)
-        
-        pg.draw.line(
-            screen,
-            (255, 50, 50),
-            (int(player_x), int(player_y)),
-            (int(ray_x), int(ray_y)),
-            3
-        )
+        #рисую лучи
+        num_ray = 40
+        FOV = math.pi / 3
 
+        start_angle = angle - FOV / 2
+
+        for i in range(num_ray):
+            ray_angle = start_angle + FOV * i / (num_ray - 1)
+            ray_x, ray_y = cast_ray(player_x, player_y, ray_angle)
+
+            pg.draw.line(
+                screen,
+                (255, 50, 50),
+                (int(player_x), int(player_y)),
+                (int(ray_x), int(ray_y)),
+                2
+            )
         pg.display.flip()
         
     pg.quit()
