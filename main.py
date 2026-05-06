@@ -33,7 +33,7 @@ def cast_ray(player_x, player_y, angle):
 
         if is_wall_at_pixel(ray_x, ray_y) == True:
             break
-    return ray_x, ray_y
+    return ray_x, ray_y, depth
         
 def collides_circle(px: float, py: float, r: float) -> bool:
     points = [
@@ -163,12 +163,23 @@ def main():
         #рисую лучи
         num_ray = 40
         FOV = math.pi / 3
+        WALL_CONST = 20000
 
         start_angle = angle - FOV / 2
 
         for i in range(num_ray):
             ray_angle = start_angle + FOV * i / (num_ray - 1)
-            ray_x, ray_y = cast_ray(player_x, player_y, ray_angle)
+            ray_x, ray_y, depth = cast_ray(player_x, player_y, ray_angle)
+            wall_height = int(WALL_CONST / depth)
+            strip_width = int(WIDTH / num_ray)
+            x_wall = i * strip_width
+            y_wall = HEIGHT / 2 - wall_height / 2
+
+            pg.draw.rect(
+            screen,
+            (255, 50, 50),
+            (x_wall, y_wall, strip_width ,wall_height)
+            )
 
             pg.draw.line(
                 screen,
