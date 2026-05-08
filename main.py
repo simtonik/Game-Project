@@ -67,6 +67,9 @@ def main():
 
     running = True
     mouse_captured = True
+    night_vision_max_charge = 20.0
+    night_vision_charge = night_vision_max_charge
+    night_vision_drain = 1.0
 
     while running:
         dt = clock.tick(FPS) / 1000.0
@@ -142,6 +145,15 @@ def main():
         ny = player_y + dy
         if not collides_circle(player_x, ny, PLAYER_RADIUS):
             player_y = ny     
+
+        if night_vision_charge > 0:
+            night_vision_charge -= night_vision_drain * dt
+            current_fog = 0.003
+            min_brightness = 20
+        else:
+            night_vision_charge = 0
+            current_fog = 0.02
+            min_brightness = 5
         ###
         screen.fill((30, 30, 30))
 
@@ -161,7 +173,7 @@ def main():
         dy = line_length * pg.math.Vector2(1, 0).rotate_rad(angle).y 
 
         #рисую лучи
-        num_ray = 40
+        num_ray = WIDTH
         FOV = math.pi / 3
         WALL_CONST = 20000
 
@@ -170,24 +182,21 @@ def main():
         for i in range(num_ray):
             ray_angle = start_angle + FOV * i / (num_ray - 1)
             ray_x, ray_y, depth = cast_ray(player_x, player_y, ray_angle)
-            wall_height = int(WALL_CONST / depth)
-            strip_width = int(WIDTH / num_ray)
+            anti_fish_depth = depth * math.cos(ray_angle - angle)
+            wall_height = int(WALL_CONST / anti_fish_depth)
+            brightness = int(255 / (1 + anti_fish_depth * current_fog))
+            brightness = max(min_brightness, min(255, brightness))
+            strip_width = 1
             x_wall = i * strip_width
             y_wall = HEIGHT / 2 - wall_height / 2
+            
 
             pg.draw.rect(
-            screen,
-            (255, 50, 50),
-            (x_wall, y_wall, strip_width ,wall_height)
+                screen,
+                (brightness, brightness, brightness),
+                (x_wall, y_wall, strip_width, wall_height)
             )
 
-            pg.draw.line(
-                screen,
-                (255, 50, 50),
-                (int(player_x), int(player_y)),
-                (int(ray_x), int(ray_y)),
-                2
-            )
         pg.display.flip()
         
     pg.quit()
