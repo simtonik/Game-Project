@@ -70,6 +70,10 @@ def main():
     night_vision_max_charge = 20.0
     night_vision_charge = night_vision_max_charge
     night_vision_drain = 1.0
+    flashlight_on = False
+    flashlight_max_charge = 20.0
+    flashlight_charge = flashlight_max_charge
+    flashlight_drain = 1.0
 
     while running:
         dt = clock.tick(FPS) / 1000.0
@@ -84,6 +88,8 @@ def main():
                     pg.event.set_grab(mouse_captured)
                     pg.mouse.set_visible(not mouse_captured)
                     pg.mouse.get_rel()
+                if event.key == pg.K_f and flashlight_charge > 0:
+                    flashlight_on = not flashlight_on
 
         #обработка клавиш
         keys = pg.key.get_pressed()
@@ -154,6 +160,12 @@ def main():
             night_vision_charge = 0
             current_fog = 0.02
             min_brightness = 5
+
+        if flashlight_on:
+            flashlight_charge -= flashlight_drain * dt
+            if flashlight_charge <= 0:
+                flashlight_charge = 0
+                flashlight_on = False
         ###
         screen.fill((30, 30, 30))
 
@@ -176,6 +188,8 @@ def main():
         num_ray = WIDTH
         FOV = math.pi / 3
         WALL_CONST = 20000
+        FLASHLIGHT_CONE = FOV / 4
+        FLASHLIGHT_POWER = 0.5
 
         start_angle = angle - FOV / 2
 
@@ -186,6 +200,11 @@ def main():
             wall_height = int(WALL_CONST / anti_fish_depth)
             brightness = int(255 / (1 + anti_fish_depth * current_fog))
             brightness = max(min_brightness, min(255, brightness))
+            if flashlight_on:
+                ray_offset = abs(ray_angle - angle)
+                flashlight_strength = max(0, 1 - ray_offset / FLASHLIGHT_CONE)
+                brightness += int((255 - brightness) * flashlight_strength * FLASHLIGHT_POWER)
+                brightness = min(255, brightness)
             strip_width = 1
             x_wall = i * strip_width
             y_wall = HEIGHT / 2 - wall_height / 2
