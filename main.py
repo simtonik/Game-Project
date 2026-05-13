@@ -34,6 +34,61 @@ def cast_ray(player_x, player_y, angle):
         if is_wall_at_pixel(ray_x, ray_y) == True:
             break
     return ray_x, ray_y, depth
+
+
+def get_texture_x(ray_x, ray_y, texture_width):
+    hit_x = (ray_x - offset_x) % TILE_SIZE
+    hit_y = (ray_y - offset_y) % TILE_SIZE
+
+    if hit_x < 2 or hit_x > TILE_SIZE - 2:
+        texture_pos = hit_y / TILE_SIZE
+    else:
+        texture_pos = hit_x / TILE_SIZE
+
+    return int(texture_pos * (texture_width - 1))
+
+
+def draw_floor_casting(screen, texture, player_x, player_y, angle, fov, wall_const, current_fog, min_brightness):
+    render_scale = 3
+    floor_width = WIDTH // render_scale
+    floor_height = (HEIGHT // 2) // render_scale
+    floor_surface = pg.Surface((floor_width, floor_height))
+    texture_width = texture.get_width()
+    texture_height = texture.get_height()
+    left_angle = angle - fov / 2
+    right_angle = angle + fov / 2
+    left_dir_x = math.cos(left_angle)
+    left_dir_y = math.sin(left_angle)
+    right_dir_x = math.cos(right_angle)
+    right_dir_y = math.sin(right_angle)
+
+    for y in range(floor_height):
+        screen_y = HEIGHT // 2 + (y + 1) * render_scale
+        row_depth = wall_const / (screen_y - HEIGHT / 2)
+        floor_x = player_x + left_dir_x * row_depth
+        floor_y = player_y + left_dir_y * row_depth
+        step_x = (right_dir_x - left_dir_x) * row_depth / floor_width
+        step_y = (right_dir_y - left_dir_y) * row_depth / floor_width
+        brightness = int(255 / (1 + row_depth * current_fog))
+        brightness = max(min_brightness, min(255, brightness))
+
+        for x in range(floor_width):
+            texture_x = int(((floor_x - offset_x) % TILE_SIZE) / TILE_SIZE * texture_width)
+            texture_y = int(((floor_y - offset_y) % TILE_SIZE) / TILE_SIZE * texture_height)
+            color = texture.get_at((texture_x, texture_y))
+            floor_surface.set_at(
+                (x, y),
+                (
+                    color.r * brightness // 255,
+                    color.g * brightness // 255,
+                    color.b * brightness // 255
+                )
+            )
+            floor_x += step_x
+            floor_y += step_y
+
+    floor_surface = pg.transform.scale(floor_surface, (WIDTH, HEIGHT // 2))
+    screen.blit(floor_surface, (0, HEIGHT // 2))
         
 def collides_circle(px: float, py: float, r: float) -> bool:
     points = [
@@ -57,6 +112,10 @@ def main():
     pg.mouse.get_rel()
     pg.display.set_caption("Pygame basics")
     clock = pg.time.Clock()
+    wall_texture = pg.image.load("assets/textures/wall.png").convert()
+    floor_texture = pg.image.load("assets/textures/Floor_1.png").convert()
+    texture_width = wall_texture.get_width()
+    texture_height = wall_texture.get_height()
 
     angle = 0.0
     rot_speed = 2.5
@@ -168,7 +227,7 @@ def main():
                 flashlight_on = False
         ###
         screen.fill((30, 30, 30))
-
+        '''
         for row_idx, row in enumerate(WORLD_MAP):
             for col_idx, cell in enumerate(row):
                 cell_x = offset_x + col_idx * TILE_SIZE
@@ -176,20 +235,19 @@ def main():
                 if cell == "1":
                     pg.draw.rect(screen, (100, 100, 100),
                                  (cell_x, cell_y, TILE_SIZE, TILE_SIZE))
-
+        '''
         # рисую игрока
-        pg.draw.circle(screen, (220, 220, 220), (int(player_x), int(player_y)), PLAYER_RADIUS)
+        #pg.draw.circle(screen, (220, 220, 220), (int(player_x), int(player_y)), PLAYER_RADIUS)
 
-        line_length = 40
-        dx = line_length * pg.math.Vector2(1, 0).rotate_rad(angle).x
-        dy = line_length * pg.math.Vector2(1, 0).rotate_rad(angle).y 
 
         #рисую лучи
-        num_ray = WIDTH
+        num_ray = WIDTH // 2
         FOV = math.pi / 3
         WALL_CONST = 20000
         FLASHLIGHT_CONE = FOV / 4
         FLASHLIGHT_POWER = 0.5
+        pg.draw.rect(screen, (45, 45, 45), (0, 0, WIDTH, HEIGHT // 2))
+        draw_floor_casting(screen, floor_texture, player_x, player_y, angle, FOV, WALL_CONST, current_fog, min_brightness)
 
         start_angle = angle - FOV / 2
 
@@ -197,7 +255,7 @@ def main():
             ray_angle = start_angle + FOV * i / (num_ray - 1)
             ray_x, ray_y, depth = cast_ray(player_x, player_y, ray_angle)
             anti_fish_depth = depth * math.cos(ray_angle - angle)
-            wall_height = int(WALL_CONST / anti_fish_depth)
+            wall_height = max(1, int(WALL_CONST / anti_fish_depth))
             brightness = int(255 / (1 + anti_fish_depth * current_fog))
             brightness = max(min_brightness, min(255, brightness))
             if flashlight_on:
@@ -205,16 +263,14 @@ def main():
                 flashlight_strength = max(0, 1 - ray_offset / FLASHLIGHT_CONE)
                 brightness += int((255 - brightness) * flashlight_strength * FLASHLIGHT_POWER)
                 brightness = min(255, brightness)
-            strip_width = 1
+            strip_width = 2
             x_wall = i * strip_width
             y_wall = HEIGHT / 2 - wall_height / 2
-            
-
-            pg.draw.rect(
-                screen,
-                (brightness, brightness, brightness),
-                (x_wall, y_wall, strip_width, wall_height)
-            )
+            texture_x = get_texture_x(ray_x, ray_y, texture_width)
+            texture_column = wall_texture.subsurface((texture_x, 0, 1, texture_height))
+            wall_column = pg.transform.scale(texture_column, (strip_width, wall_height))
+            wall_column.fill((brightness, brightness, brightness), special_flags=pg.BLEND_MULT)
+            screen.blit(wall_column, (x_wall, y_wall))
 
         pg.display.flip()
         
