@@ -2,7 +2,7 @@ import pygame as pg
 import math
 from map import WORLD_MAP, MAP_W, MAP_H
 
-PLAYER_RADIUS = 12
+PLAYER_RADIUS = 8
 WIDTH, HEIGHT = 800, 600
 FPS = 60
 MOUSE_SENS = 0.003
@@ -64,7 +64,7 @@ def draw_floor_casting(screen, texture, player_x, player_y, angle, fov, wall_con
 
     for y in range(floor_height):
         screen_y = HEIGHT // 2 + (y + 1) * render_scale
-        row_depth = wall_const / (screen_y - HEIGHT / 2)
+        row_depth = (wall_const / 2) / (screen_y - HEIGHT / 2)
         floor_x = player_x + left_dir_x * row_depth
         floor_y = player_y + left_dir_y * row_depth
         step_x = (right_dir_x - left_dir_x) * row_depth / floor_width
@@ -89,7 +89,50 @@ def draw_floor_casting(screen, texture, player_x, player_y, angle, fov, wall_con
 
     floor_surface = pg.transform.scale(floor_surface, (WIDTH, HEIGHT // 2))
     screen.blit(floor_surface, (0, HEIGHT // 2))
-        
+
+
+def draw_ceiling_casting(screen, texture, player_x, player_y, angle, fov, wall_const, current_fog, min_brightness):
+    render_scale = 3
+    ceiling_width = WIDTH // render_scale
+    ceiling_height = (HEIGHT // 2) // render_scale
+    ceiling_surface = pg.Surface((ceiling_width, ceiling_height))
+    texture_width = texture.get_width()
+    texture_height = texture.get_height()
+    left_angle = angle - fov / 2
+    right_angle = angle + fov / 2
+    left_dir_x = math.cos(left_angle)
+    left_dir_y = math.sin(left_angle)
+    right_dir_x = math.cos(right_angle)
+    right_dir_y = math.sin(right_angle)
+
+    for y in range(ceiling_height):
+        screen_y = y * render_scale
+        row_depth = (wall_const / 2) / (HEIGHT / 2 - screen_y)
+        ceiling_x = player_x + left_dir_x * row_depth
+        ceiling_y = player_y + left_dir_y * row_depth
+        step_x = (right_dir_x - left_dir_x) * row_depth / ceiling_width
+        step_y = (right_dir_y - left_dir_y) * row_depth / ceiling_width
+        brightness = int(255 / (1 + row_depth * current_fog))
+        brightness = max(min_brightness, min(255, brightness))
+
+        for x in range(ceiling_width):
+            texture_x = int(((ceiling_x - offset_x) % TILE_SIZE) / TILE_SIZE * texture_width)
+            texture_y = int(((ceiling_y - offset_y) % TILE_SIZE) / TILE_SIZE * texture_height)
+            color = texture.get_at((texture_x, texture_y))
+            ceiling_surface.set_at(
+                (x, y),
+                (
+                    color.r * brightness // 255,
+                    color.g * brightness // 255,
+                    color.b * brightness // 255
+                )
+            )
+            ceiling_x += step_x
+            ceiling_y += step_y
+
+    ceiling_surface = pg.transform.scale(ceiling_surface, (WIDTH, HEIGHT // 2))
+    screen.blit(ceiling_surface, (0, 0))
+         
 def collides_circle(px: float, py: float, r: float) -> bool:
     points = [
         (px + r, py),
@@ -112,8 +155,9 @@ def main():
     pg.mouse.get_rel()
     pg.display.set_caption("Pygame basics")
     clock = pg.time.Clock()
-    wall_texture = pg.image.load("assets/textures/wall.png").convert()
+    wall_texture = pg.image.load("assets/textures/Wall_2.png").convert()
     floor_texture = pg.image.load("assets/textures/Floor_1.png").convert()
+    ceiling_texture = pg.image.load("assets/textures/ceiling_1.png").convert()
     texture_width = wall_texture.get_width()
     texture_height = wall_texture.get_height()
 
@@ -121,11 +165,12 @@ def main():
     rot_speed = 2.5
 
     player_x = offset_x + 1.5 * TILE_SIZE
-    player_y = offset_y + 1.5 * TILE_SIZE
+    player_y = offset_y + 4.5 * TILE_SIZE
     speed = 250
 
     running = True
     mouse_captured = True
+    #переменные для обзора
     night_vision_max_charge = 20.0
     night_vision_charge = night_vision_max_charge
     night_vision_drain = 1.0
@@ -246,7 +291,7 @@ def main():
         WALL_CONST = 20000
         FLASHLIGHT_CONE = FOV / 4
         FLASHLIGHT_POWER = 0.5
-        pg.draw.rect(screen, (45, 45, 45), (0, 0, WIDTH, HEIGHT // 2))
+        draw_ceiling_casting(screen, ceiling_texture, player_x, player_y, angle, FOV, WALL_CONST, current_fog, min_brightness)
         draw_floor_casting(screen, floor_texture, player_x, player_y, angle, FOV, WALL_CONST, current_fog, min_brightness)
 
         start_angle = angle - FOV / 2
