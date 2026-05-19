@@ -1,6 +1,8 @@
 import pygame as pg
 import math
+from pathlib import Path
 from map import WORLD_MAP, MAP_W, MAP_H
+from enemy import Enemy
 
 PLAYER_RADIUS = 8
 WIDTH, HEIGHT = 800, 600
@@ -132,6 +134,82 @@ def draw_ceiling_casting(screen, texture, player_x, player_y, angle, fov, wall_c
 
     ceiling_surface = pg.transform.scale(ceiling_surface, (WIDTH, HEIGHT // 2))
     screen.blit(ceiling_surface, (0, 0))
+
+
+def normalize_angle(angle):
+    return (angle + math.pi) % (math.pi * 2) - math.pi
+
+
+def load_enemy_sprites():
+    sprite_path = next(path for path in Path("assets/cheremshha").glob("*.png") if ".bak" not in path.name)
+    sprite_sheet = pg.image.load(str(sprite_path)).convert_alpha()
+    width = sprite_sheet.get_width()
+    height = sprite_sheet.get_height()
+    frame_width = width // 8
+    sprites = []
+    for frame in range(8):
+        frame_surface = sprite_sheet.subsurface((frame * frame_width, 0, frame_width, height))
+        y_values = []
+        x_values = []
+        for y in range(height):
+            for x in range(frame_width):
+                if frame_surface.get_at((x, y)).a > 10:
+                    y_values.append(y)
+                    x_values.append(x)
+
+        x1 = max(0, min(x_values) - 2)
+        x2 = min(frame_width - 1, max(x_values) + 2)
+        y1 = max(0, min(y_values) - 2)
+        y2 = min(height - 1, max(y_values) + 2)
+        sprites.append(frame_surface.subsurface((x1, y1, x2 - x1 + 1, y2 - y1 + 1)).copy())
+
+    return sprites
+
+
+def draw_enemy_sprite(screen, enemy, sprites, player_x, player_y, angle, fov, wall_const, z_buffer, strip_width, current_fog, min_brightness):
+    if not enemy.alive:
+        return
+
+    dx = enemy.x - player_x
+    dy = enemy.y - player_y
+    distance = math.hypot(dx, dy)
+    angle_to_enemy = math.atan2(dy, dx)
+    angle_offset = normalize_angle(angle_to_enemy - angle)
+
+    if abs(angle_offset) > fov / 2:
+        return
+
+    corrected_distance = distance * math.cos(angle_offset)
+    if corrected_distance <= 1:
+        return
+
+    enemy_to_player_angle = math.atan2(player_y - enemy.y, player_x - enemy.x)
+    sprite_angle = normalize_angle(enemy_to_player_angle - enemy.angle)
+    sprite_index = int(round(-sprite_angle / (math.pi * 2) * 8)) % 8
+    sprite = sprites[sprite_index]
+
+    sprite_height = max(1, int(wall_const / corrected_distance * 1.2))
+    sprite_width = max(1, int(sprite.get_width() * sprite_height / sprite.get_height()))
+    screen_x = int((angle_offset + fov / 2) / fov * WIDTH)
+    x_left = screen_x - sprite_width // 2
+    y_top = HEIGHT // 2 - sprite_height // 2
+    scaled_sprite = pg.transform.scale(sprite, (sprite_width, sprite_height))
+
+    brightness = int(255 / (1 + corrected_distance * current_fog))
+    brightness = max(min_brightness, min(255, brightness))
+    scaled_sprite.fill((brightness, brightness, brightness), special_flags=pg.BLEND_MULT)
+
+    for x in range(sprite_width):
+        screen_column = x_left + x
+        if screen_column < 0 or screen_column >= WIDTH:
+            continue
+
+        buffer_index = screen_column // strip_width
+        if buffer_index >= len(z_buffer) or corrected_distance >= z_buffer[buffer_index]:
+            continue
+
+        column = scaled_sprite.subsurface((x, 0, 1, sprite_height))
+        screen.blit(column, (screen_column, y_top))
          
 def collides_circle(px: float, py: float, r: float) -> bool:
     points = [
@@ -158,6 +236,7 @@ def main():
     wall_texture = pg.image.load("assets/textures/Wall_2.png").convert()
     floor_texture = pg.image.load("assets/textures/Floor_1.png").convert()
     ceiling_texture = pg.image.load("assets/textures/ceiling_1.png").convert()
+    enemy_sprites = load_enemy_sprites()
     texture_width = wall_texture.get_width()
     texture_height = wall_texture.get_height()
 
@@ -167,6 +246,7 @@ def main():
     player_x = offset_x + 1.5 * TILE_SIZE
     player_y = offset_y + 4.5 * TILE_SIZE
     speed = 250
+    enemy = Enemy(offset_x + 18.5 * TILE_SIZE, offset_y + 3.5 * TILE_SIZE, math.pi)
 
     running = True
     mouse_captured = True
@@ -256,6 +336,8 @@ def main():
         if not collides_circle(player_x, ny, PLAYER_RADIUS):
             player_y = ny     
 
+        enemy.update(player_x, player_y, dt, collides_circle, is_wall_at_pixel)
+
         if night_vision_charge > 0:
             night_vision_charge -= night_vision_drain * dt
             current_fog = 0.003
@@ -293,6 +375,7 @@ def main():
         FLASHLIGHT_POWER = 0.5
         draw_ceiling_casting(screen, ceiling_texture, player_x, player_y, angle, FOV, WALL_CONST, current_fog, min_brightness)
         draw_floor_casting(screen, floor_texture, player_x, player_y, angle, FOV, WALL_CONST, current_fog, min_brightness)
+        z_buffer = []
 
         start_angle = angle - FOV / 2
 
@@ -300,6 +383,7 @@ def main():
             ray_angle = start_angle + FOV * i / (num_ray - 1)
             ray_x, ray_y, depth = cast_ray(player_x, player_y, ray_angle)
             anti_fish_depth = depth * math.cos(ray_angle - angle)
+            z_buffer.append(anti_fish_depth)
             wall_height = max(1, int(WALL_CONST / anti_fish_depth))
             brightness = int(255 / (1 + anti_fish_depth * current_fog))
             brightness = max(min_brightness, min(255, brightness))
@@ -316,6 +400,21 @@ def main():
             wall_column = pg.transform.scale(texture_column, (strip_width, wall_height))
             wall_column.fill((brightness, brightness, brightness), special_flags=pg.BLEND_MULT)
             screen.blit(wall_column, (x_wall, y_wall))
+
+        draw_enemy_sprite(
+            screen,
+            enemy,
+            enemy_sprites,
+            player_x,
+            player_y,
+            angle,
+            FOV,
+            WALL_CONST,
+            z_buffer,
+            strip_width,
+            current_fog,
+            min_brightness
+        )
 
         pg.display.flip()
         
