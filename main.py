@@ -1,13 +1,16 @@
 import pygame as pg
 import math
-from pathlib import Path
 from map import WORLD_MAP, MAP_W, MAP_H
 from enemy import Enemy
+from menu import draw_menu, menu_events
+
 
 PLAYER_RADIUS = 8
 WIDTH, HEIGHT = 800, 600
 FPS = 60
 MOUSE_SENS = 0.003
+#game_status = "menu"
+
 
 TILE_SIZE = min(WIDTH // MAP_W, HEIGHT // MAP_H)
 offset_x = (WIDTH - MAP_W * TILE_SIZE) // 2
@@ -50,7 +53,17 @@ def get_texture_x(ray_x, ray_y, texture_width):
     return int(texture_pos * (texture_width - 1))
 
 
-def draw_floor_casting(screen, texture, player_x, player_y, angle, fov, wall_const, current_fog, min_brightness):
+def apply_flashlight(brightness, target_angle, angle, flashlight_on, flashlight_cone, flashlight_power):
+    if not flashlight_on:
+        return brightness
+
+    ray_offset = abs(normalize_angle(target_angle - angle))
+    flashlight_strength = max(0, 1 - ray_offset / flashlight_cone)
+    brightness += int((255 - brightness) * flashlight_strength * flashlight_power)
+    return min(255, brightness)
+
+
+def draw_floor_casting(screen, texture, player_x, player_y, angle, fov, wall_const, current_fog, min_brightness, flashlight_on, flashlight_cone, flashlight_power):
     render_scale = 3
     floor_width = WIDTH // render_scale
     floor_height = (HEIGHT // 2) // render_scale
@@ -71,10 +84,12 @@ def draw_floor_casting(screen, texture, player_x, player_y, angle, fov, wall_con
         floor_y = player_y + left_dir_y * row_depth
         step_x = (right_dir_x - left_dir_x) * row_depth / floor_width
         step_y = (right_dir_y - left_dir_y) * row_depth / floor_width
-        brightness = int(255 / (1 + row_depth * current_fog))
-        brightness = max(min_brightness, min(255, brightness))
 
         for x in range(floor_width):
+            point_angle = math.atan2(floor_y - player_y, floor_x - player_x)
+            brightness = int(255 / (1 + row_depth * current_fog))
+            brightness = max(min_brightness, min(255, brightness))
+            brightness = apply_flashlight(brightness, point_angle, angle, flashlight_on, flashlight_cone, flashlight_power)
             texture_x = int(((floor_x - offset_x) % TILE_SIZE) / TILE_SIZE * texture_width)
             texture_y = int(((floor_y - offset_y) % TILE_SIZE) / TILE_SIZE * texture_height)
             color = texture.get_at((texture_x, texture_y))
@@ -93,7 +108,7 @@ def draw_floor_casting(screen, texture, player_x, player_y, angle, fov, wall_con
     screen.blit(floor_surface, (0, HEIGHT // 2))
 
 
-def draw_ceiling_casting(screen, texture, player_x, player_y, angle, fov, wall_const, current_fog, min_brightness):
+def draw_ceiling_casting(screen, texture, player_x, player_y, angle, fov, wall_const, current_fog, min_brightness, flashlight_on, flashlight_cone, flashlight_power):
     render_scale = 3
     ceiling_width = WIDTH // render_scale
     ceiling_height = (HEIGHT // 2) // render_scale
@@ -114,10 +129,12 @@ def draw_ceiling_casting(screen, texture, player_x, player_y, angle, fov, wall_c
         ceiling_y = player_y + left_dir_y * row_depth
         step_x = (right_dir_x - left_dir_x) * row_depth / ceiling_width
         step_y = (right_dir_y - left_dir_y) * row_depth / ceiling_width
-        brightness = int(255 / (1 + row_depth * current_fog))
-        brightness = max(min_brightness, min(255, brightness))
 
         for x in range(ceiling_width):
+            point_angle = math.atan2(ceiling_y - player_y, ceiling_x - player_x)
+            brightness = int(255 / (1 + row_depth * current_fog))
+            brightness = max(min_brightness, min(255, brightness))
+            brightness = apply_flashlight(brightness, point_angle, angle, flashlight_on, flashlight_cone, flashlight_power)
             texture_x = int(((ceiling_x - offset_x) % TILE_SIZE) / TILE_SIZE * texture_width)
             texture_y = int(((ceiling_y - offset_y) % TILE_SIZE) / TILE_SIZE * texture_height)
             color = texture.get_at((texture_x, texture_y))
@@ -140,33 +157,7 @@ def normalize_angle(angle):
     return (angle + math.pi) % (math.pi * 2) - math.pi
 
 
-def load_enemy_sprites():
-    sprite_path = next(path for path in Path("assets/cheremshha").glob("*.png") if ".bak" not in path.name)
-    sprite_sheet = pg.image.load(str(sprite_path)).convert_alpha()
-    width = sprite_sheet.get_width()
-    height = sprite_sheet.get_height()
-    frame_width = width // 8
-    sprites = []
-    for frame in range(8):
-        frame_surface = sprite_sheet.subsurface((frame * frame_width, 0, frame_width, height))
-        y_values = []
-        x_values = []
-        for y in range(height):
-            for x in range(frame_width):
-                if frame_surface.get_at((x, y)).a > 10:
-                    y_values.append(y)
-                    x_values.append(x)
-
-        x1 = max(0, min(x_values) - 2)
-        x2 = min(frame_width - 1, max(x_values) + 2)
-        y1 = max(0, min(y_values) - 2)
-        y2 = min(height - 1, max(y_values) + 2)
-        sprites.append(frame_surface.subsurface((x1, y1, x2 - x1 + 1, y2 - y1 + 1)).copy())
-
-    return sprites
-
-
-def draw_enemy_sprite(screen, enemy, sprites, player_x, player_y, angle, fov, wall_const, z_buffer, strip_width, current_fog, min_brightness):
+def draw_enemy_sprite(screen, enemy, player_x, player_y, angle, fov, wall_const, z_buffer, strip_width, current_fog, min_brightness, flashlight_on, flashlight_cone, flashlight_power):
     if not enemy.alive:
         return
 
@@ -183,10 +174,7 @@ def draw_enemy_sprite(screen, enemy, sprites, player_x, player_y, angle, fov, wa
     if corrected_distance <= 1:
         return
 
-    enemy_to_player_angle = math.atan2(player_y - enemy.y, player_x - enemy.x)
-    sprite_angle = normalize_angle(enemy_to_player_angle - enemy.angle)
-    sprite_index = int(round(-sprite_angle / (math.pi * 2) * 8)) % 8
-    sprite = sprites[sprite_index]
+    sprite = enemy.get_current_sprite(player_x, player_y)
 
     sprite_height = max(1, int(wall_const / corrected_distance * 1.2))
     sprite_width = max(1, int(sprite.get_width() * sprite_height / sprite.get_height()))
@@ -197,6 +185,7 @@ def draw_enemy_sprite(screen, enemy, sprites, player_x, player_y, angle, fov, wa
 
     brightness = int(255 / (1 + corrected_distance * current_fog))
     brightness = max(min_brightness, min(255, brightness))
+    brightness = apply_flashlight(brightness, angle_to_enemy, angle, flashlight_on, flashlight_cone, flashlight_power)
     scaled_sprite.fill((brightness, brightness, brightness), special_flags=pg.BLEND_MULT)
 
     for x in range(sprite_width):
@@ -228,15 +217,14 @@ def collides_circle(px: float, py: float, r: float) -> bool:
 def main():
     pg.init()
     screen = pg.display.set_mode((WIDTH, HEIGHT))
-    pg.event.set_grab(True)
-    pg.mouse.set_visible(False)
+    pg.event.set_grab(False)
+    pg.mouse.set_visible(True)
     pg.mouse.get_rel()
     pg.display.set_caption("Pygame basics")
     clock = pg.time.Clock()
     wall_texture = pg.image.load("assets/textures/Wall_2.png").convert()
     floor_texture = pg.image.load("assets/textures/Floor_1.png").convert()
     ceiling_texture = pg.image.load("assets/textures/ceiling_1.png").convert()
-    enemy_sprites = load_enemy_sprites()
     texture_width = wall_texture.get_width()
     texture_height = wall_texture.get_height()
 
@@ -248,8 +236,10 @@ def main():
     speed = 250
     enemy = Enemy(offset_x + 18.5 * TILE_SIZE, offset_y + 3.5 * TILE_SIZE, math.pi)
 
+
+    game_status = "menu"
     running = True
-    mouse_captured = True
+    mouse_captured = False
     #переменные для обзора
     night_vision_max_charge = 20.0
     night_vision_charge = night_vision_max_charge
@@ -259,10 +249,29 @@ def main():
     flashlight_charge = flashlight_max_charge
     flashlight_drain = 1.0
 
+    font = pg.font.SysFont(None, 48)
+
+    start_buton = pg.Rect(WIDTH // 2 - 100, 250, 200, 60)
+    exit_buton = pg.Rect(WIDTH // 2 - 100, 330, 200, 60)
+
     while running:
         dt = clock.tick(FPS) / 1000.0
 
         for event in pg.event.get():
+
+            if game_status == "menu":
+                action = menu_events(event, start_buton, exit_buton)
+
+                if action == "start":
+                    game_status = "game"
+                    mouse_captured = True
+                    pg.event.set_grab(True)
+                    pg.mouse.set_visible(False)
+                    pg.mouse.get_rel()
+
+                if action == "exit":
+                    running = False
+
             if event.type == pg.QUIT:
                 running = False
             #Тут я решил сделать обработку ESC
@@ -337,15 +346,15 @@ def main():
             player_y = ny     
 
         enemy.update(player_x, player_y, dt, collides_circle, is_wall_at_pixel)
-
+        #ночное видение
         if night_vision_charge > 0:
             night_vision_charge -= night_vision_drain * dt
             current_fog = 0.003
             min_brightness = 20
         else:
             night_vision_charge = 0
-            current_fog = 0.02
-            min_brightness = 5
+            current_fog = 0.09
+            min_brightness = 7
 
         if flashlight_on:
             flashlight_charge -= flashlight_drain * dt
@@ -365,16 +374,19 @@ def main():
         '''
         # рисую игрока
         #pg.draw.circle(screen, (220, 220, 220), (int(player_x), int(player_y)), PLAYER_RADIUS)
-
+        if game_status == "menu":
+            draw_menu(screen, font, start_buton, exit_buton)
+            pg.display.flip()
+            continue
 
         #рисую лучи
         num_ray = WIDTH // 2
-        FOV = math.pi / 3
+        FOV = math.pi / 3 #Угол обзора игрока
         WALL_CONST = 20000
         FLASHLIGHT_CONE = FOV / 4
         FLASHLIGHT_POWER = 0.5
-        draw_ceiling_casting(screen, ceiling_texture, player_x, player_y, angle, FOV, WALL_CONST, current_fog, min_brightness)
-        draw_floor_casting(screen, floor_texture, player_x, player_y, angle, FOV, WALL_CONST, current_fog, min_brightness)
+        draw_ceiling_casting(screen, ceiling_texture, player_x, player_y, angle, FOV, WALL_CONST, current_fog, min_brightness, flashlight_on, FLASHLIGHT_CONE, FLASHLIGHT_POWER)
+        draw_floor_casting(screen, floor_texture, player_x, player_y, angle, FOV, WALL_CONST, current_fog, min_brightness, flashlight_on, FLASHLIGHT_CONE, FLASHLIGHT_POWER)
         z_buffer = []
 
         start_angle = angle - FOV / 2
@@ -387,11 +399,7 @@ def main():
             wall_height = max(1, int(WALL_CONST / anti_fish_depth))
             brightness = int(255 / (1 + anti_fish_depth * current_fog))
             brightness = max(min_brightness, min(255, brightness))
-            if flashlight_on:
-                ray_offset = abs(ray_angle - angle)
-                flashlight_strength = max(0, 1 - ray_offset / FLASHLIGHT_CONE)
-                brightness += int((255 - brightness) * flashlight_strength * FLASHLIGHT_POWER)
-                brightness = min(255, brightness)
+            brightness = apply_flashlight(brightness, ray_angle, angle, flashlight_on, FLASHLIGHT_CONE, FLASHLIGHT_POWER)
             strip_width = 2
             x_wall = i * strip_width
             y_wall = HEIGHT / 2 - wall_height / 2
@@ -400,11 +408,11 @@ def main():
             wall_column = pg.transform.scale(texture_column, (strip_width, wall_height))
             wall_column.fill((brightness, brightness, brightness), special_flags=pg.BLEND_MULT)
             screen.blit(wall_column, (x_wall, y_wall))
-
+            
+        #отрисовка спрайта дуры
         draw_enemy_sprite(
             screen,
             enemy,
-            enemy_sprites,
             player_x,
             player_y,
             angle,
@@ -413,7 +421,10 @@ def main():
             z_buffer,
             strip_width,
             current_fog,
-            min_brightness
+            min_brightness,
+            flashlight_on,
+            FLASHLIGHT_CONE,
+            FLASHLIGHT_POWER
         )
 
         pg.display.flip()
