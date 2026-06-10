@@ -16,6 +16,15 @@ TILE_SIZE = min(WIDTH // MAP_W, HEIGHT // MAP_H)
 offset_x = (WIDTH - MAP_W * TILE_SIZE) // 2
 offset_y = (HEIGHT - MAP_H * TILE_SIZE) // 2
 
+heavy_door_open = False
+
+
+def is_blocking_cell(cell: str) -> bool:
+    if cell == "H":
+        return not heavy_door_open
+
+    return cell in ("1", "2", "3", "D")
+
 
 def is_wall_at_pixel(px: float, py: float) -> bool:
     mx = int((px - offset_x) // TILE_SIZE)
@@ -24,7 +33,74 @@ def is_wall_at_pixel(px: float, py: float) -> bool:
     if mx < 0 or my < 0 or mx >= MAP_W or my >= MAP_H:
         return True
     
-    return WORLD_MAP[my][mx] == "1"
+    return is_blocking_cell(WORLD_MAP[my][mx])
+
+
+def get_map_cell_at_pixel(px: float, py: float) -> str:
+    mx = int((px - offset_x) // TILE_SIZE)
+    my = int((py - offset_y) // TILE_SIZE)
+
+    if mx < 0 or my < 0 or mx >= MAP_W or my >= MAP_H:
+        return "1"
+
+    return WORLD_MAP[my][mx]
+
+
+def cell_center(col, row):
+    return offset_x + (col + 0.5) * TILE_SIZE, offset_y + (row + 0.5) * TILE_SIZE
+
+
+def can_stand_on_cell(col, row):
+    if col < 0 or row < 0 or col >= MAP_W or row >= MAP_H:
+        return False
+
+    return not is_blocking_cell(WORLD_MAP[row][col])
+
+
+def get_near_security_door(player_x, player_y):
+    max_distance = TILE_SIZE * 1.2
+    nearest_door = None
+    nearest_distance = max_distance
+
+    for row_idx, row in enumerate(WORLD_MAP):
+        for col_idx, cell in enumerate(row):
+            if cell != "D":
+                continue
+
+            door_x, door_y = cell_center(col_idx, row_idx)
+            distance = math.hypot(player_x - door_x, player_y - door_y)
+            if distance < nearest_distance:
+                nearest_distance = distance
+                nearest_door = (col_idx, row_idx)
+
+    return nearest_door
+
+
+def teleport_through_security_door(player_x, player_y):
+    door = get_near_security_door(player_x, player_y)
+    if door is None:
+        return player_x, player_y
+
+    door_col, door_row = door
+    door_sides = [
+        ((door_col - 1, door_row), (door_col + 1, door_row)),
+        ((door_col, door_row - 1), (door_col, door_row + 1))
+    ]
+
+    for first_cell, second_cell in door_sides:
+        if not can_stand_on_cell(*first_cell) or not can_stand_on_cell(*second_cell):
+            continue
+
+        first_x, first_y = cell_center(*first_cell)
+        second_x, second_y = cell_center(*second_cell)
+        first_distance = math.hypot(player_x - first_x, player_y - first_y)
+        second_distance = math.hypot(player_x - second_x, player_y - second_y)
+
+        if first_distance < second_distance:
+            return second_x, second_y
+        return first_x, first_y
+
+    return player_x, player_y
 
 def cast_ray(player_x, player_y, angle):
     depth = 0
@@ -38,7 +114,7 @@ def cast_ray(player_x, player_y, angle):
 
         if is_wall_at_pixel(ray_x, ray_y) == True:
             break
-    return ray_x, ray_y, depth
+    return ray_x, ray_y, depth, get_map_cell_at_pixel(ray_x, ray_y)
 
 
 def get_texture_x(ray_x, ray_y, texture_width):
@@ -51,6 +127,15 @@ def get_texture_x(ray_x, ray_y, texture_width):
         texture_pos = hit_x / TILE_SIZE
 
     return int(texture_pos * (texture_width - 1))
+
+
+def make_door_texture(left_panel, right_panel):
+    width = left_panel.get_width() + right_panel.get_width()
+    height = max(left_panel.get_height(), right_panel.get_height())
+    door_texture = pg.Surface((width, height), pg.SRCALPHA)
+    door_texture.blit(left_panel, (0, height - left_panel.get_height()))
+    door_texture.blit(right_panel, (left_panel.get_width(), height - right_panel.get_height()))
+    return door_texture
 
 
 def apply_flashlight(brightness, target_angle, angle, flashlight_on, flashlight_cone, flashlight_power):
@@ -199,6 +284,77 @@ def draw_enemy_sprite(screen, enemy, player_x, player_y, angle, fov, wall_const,
 
         column = scaled_sprite.subsurface((x, 0, 1, sprite_height))
         screen.blit(column, (screen_column, y_top))
+
+
+def create_panels(panel_texture):
+    panels = []
+    for row_idx, row in enumerate(WORLD_MAP):
+        for col_idx, cell in enumerate(row):
+            if cell == "P":
+                panels.append({
+                    "x": offset_x + (col_idx + 0.5) * TILE_SIZE,
+                    "y": offset_y + (row_idx + 0.5) * TILE_SIZE,
+                    "sprite": panel_texture,
+                    "height_scale": 0.5
+                })
+
+    return panels
+
+
+def get_near_panel(player_x, player_y, panels):
+    max_distance = TILE_SIZE * 1.2
+    nearest_panel = None
+    nearest_distance = max_distance
+
+    for panel in panels:
+        distance = math.hypot(player_x - panel["x"], player_y - panel["y"])
+        if distance < nearest_distance:
+            nearest_distance = distance
+            nearest_panel = panel
+
+    return nearest_panel
+
+
+def draw_object_sprite(screen, obj, player_x, player_y, angle, fov, wall_const, z_buffer, strip_width, current_fog, min_brightness, flashlight_on, flashlight_cone, flashlight_power):
+    dx = obj["x"] - player_x
+    dy = obj["y"] - player_y
+    distance = math.hypot(dx, dy)
+    angle_to_object = math.atan2(dy, dx)
+    angle_offset = normalize_angle(angle_to_object - angle)
+
+    if abs(angle_offset) > fov / 2:
+        return
+
+    corrected_distance = distance * math.cos(angle_offset)
+    if corrected_distance <= 1:
+        return
+
+    sprite = obj["sprite"]
+    full_wall_height = wall_const / corrected_distance
+    sprite_height = max(1, int(full_wall_height * obj["height_scale"]))
+    sprite_width = max(1, int(sprite.get_width() * sprite_height / sprite.get_height()))
+    screen_x = int((angle_offset + fov / 2) / fov * WIDTH)
+    x_left = screen_x - sprite_width // 2
+    floor_y = HEIGHT // 2 + full_wall_height // 2
+    y_top = floor_y - sprite_height
+    scaled_sprite = pg.transform.scale(sprite, (sprite_width, sprite_height))
+
+    brightness = int(255 / (1 + corrected_distance * current_fog))
+    brightness = max(min_brightness, min(255, brightness))
+    brightness = apply_flashlight(brightness, angle_to_object, angle, flashlight_on, flashlight_cone, flashlight_power)
+    scaled_sprite.fill((brightness, brightness, brightness), special_flags=pg.BLEND_MULT)
+
+    for x in range(sprite_width):
+        screen_column = x_left + x
+        if screen_column < 0 or screen_column >= WIDTH:
+            continue
+
+        buffer_index = screen_column // strip_width
+        if buffer_index >= len(z_buffer) or corrected_distance >= z_buffer[buffer_index]:
+            continue
+
+        column = scaled_sprite.subsurface((x, 0, 1, sprite_height))
+        screen.blit(column, (screen_column, y_top))
          
 def collides_circle(px: float, py: float, r: float) -> bool:
     points = [
@@ -215,18 +371,34 @@ def collides_circle(px: float, py: float, r: float) -> bool:
 
 
 def main():
+    global heavy_door_open
+
     pg.init()
     screen = pg.display.set_mode((WIDTH, HEIGHT))
     pg.event.set_grab(False)
     pg.mouse.set_visible(True)
+    pg.mouse.set_pos(WIDTH // 2, HEIGHT // 2)
     pg.mouse.get_rel()
     pg.display.set_caption("Pygame basics")
     clock = pg.time.Clock()
     wall_texture = pg.image.load("assets/textures/Wall_2.png").convert()
+    sec_wall_texture = pg.image.load("assets/textures/sec_wall_2.png").convert()
+    sec_window_texture = pg.image.load("assets/textures/sec_wall.png").convert()
+    panel_texture = pg.image.load("assets/objects/sec_panel.png").convert_alpha()
+    sec_door_texture = pg.image.load("assets/textures/Door_sec.png").convert()
+    door_left_texture = pg.image.load("assets/textures/Door_L.png").convert_alpha()
+    door_right_texture = pg.image.load("assets/textures/Door_R.png").convert_alpha()
+    heavy_door_texture = make_door_texture(door_left_texture, door_right_texture)
+    wall_textures = {
+        "1": wall_texture,
+        "2": sec_wall_texture,
+        "3": sec_window_texture,
+        "D": sec_door_texture,
+        "H": heavy_door_texture
+    }
     floor_texture = pg.image.load("assets/textures/Floor_1.png").convert()
     ceiling_texture = pg.image.load("assets/textures/ceiling_1.png").convert()
-    texture_width = wall_texture.get_width()
-    texture_height = wall_texture.get_height()
+    panels = create_panels(panel_texture)
 
     angle = 0.0
     rot_speed = 2.5
@@ -281,6 +453,11 @@ def main():
                     pg.event.set_grab(mouse_captured)
                     pg.mouse.set_visible(not mouse_captured)
                     pg.mouse.get_rel()
+                if game_status == "game" and event.key == pg.K_e:
+                    if get_near_panel(player_x, player_y, panels) is not None:
+                        heavy_door_open = True
+                    else:
+                        player_x, player_y = teleport_through_security_door(player_x, player_y)
                 if event.key == pg.K_f and flashlight_charge > 0:
                     flashlight_on = not flashlight_on
 
@@ -320,11 +497,6 @@ def main():
         if forward != 0 and straf != 0:
             dx *= 0.707
             dy *= 0.707
-
-        if keys[pg.K_q]:
-            angle -= rot_speed * dt
-        if keys[pg.K_e]:
-            angle += rot_speed * dt
 
 
         if dx != 0 and dy != 0:
@@ -393,7 +565,7 @@ def main():
 
         for i in range(num_ray):
             ray_angle = start_angle + FOV * i / (num_ray - 1)
-            ray_x, ray_y, depth = cast_ray(player_x, player_y, ray_angle)
+            ray_x, ray_y, depth, hit_cell = cast_ray(player_x, player_y, ray_angle)
             anti_fish_depth = depth * math.cos(ray_angle - angle)
             z_buffer.append(anti_fish_depth)
             wall_height = max(1, int(WALL_CONST / anti_fish_depth))
@@ -403,12 +575,33 @@ def main():
             strip_width = 2
             x_wall = i * strip_width
             y_wall = HEIGHT / 2 - wall_height / 2
-            texture_x = get_texture_x(ray_x, ray_y, texture_width)
-            texture_column = wall_texture.subsurface((texture_x, 0, 1, texture_height))
+            current_texture = wall_textures.get(hit_cell, wall_texture)
+            current_texture_width = current_texture.get_width()
+            current_texture_height = current_texture.get_height()
+            texture_x = get_texture_x(ray_x, ray_y, current_texture_width)
+            texture_column = current_texture.subsurface((texture_x, 0, 1, current_texture_height))
             wall_column = pg.transform.scale(texture_column, (strip_width, wall_height))
             wall_column.fill((brightness, brightness, brightness), special_flags=pg.BLEND_MULT)
             screen.blit(wall_column, (x_wall, y_wall))
             
+        for panel in panels: #Панель на посту охрану в самом начале
+            draw_object_sprite(
+                screen,
+                panel,
+                player_x,
+                player_y,
+                angle,
+                FOV,
+                WALL_CONST,
+                z_buffer,
+                strip_width,
+                current_fog,
+                min_brightness,
+                flashlight_on,
+                FLASHLIGHT_CONE,
+                FLASHLIGHT_POWER
+            )
+
         #отрисовка спрайта дуры
         draw_enemy_sprite(
             screen,
@@ -426,6 +619,10 @@ def main():
             FLASHLIGHT_CONE,
             FLASHLIGHT_POWER
         )
+
+        if get_near_security_door(player_x, player_y) is not None or get_near_panel(player_x, player_y, panels) is not None:
+            interact_text = font.render("E", True, (230, 230, 230))
+            screen.blit(interact_text, interact_text.get_rect(center=(WIDTH // 2, HEIGHT - 80)))
 
         pg.display.flip()
         

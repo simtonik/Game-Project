@@ -47,7 +47,7 @@ class Enemy:
         self.angle = angle
         self.radius = 12
         self.hp = 100
-        self.speed = 45
+        self.speed = 35
         self.damage = 10
         self.vision_range = 350
         self.fov = math.pi / 2
