@@ -23,7 +23,7 @@ def is_blocking_cell(cell: str) -> bool:
     if cell == "H":
         return not heavy_door_open
 
-    return cell in ("1", "2", "3", "D")
+    return cell in ("1", "2", "3", "4", "5", "6", "7", "8", "9", "D")
 
 
 def is_wall_at_pixel(px: float, py: float) -> bool:
@@ -57,14 +57,14 @@ def can_stand_on_cell(col, row):
     return not is_blocking_cell(WORLD_MAP[row][col])
 
 
-def get_near_security_door(player_x, player_y):
+def get_near_door(player_x, player_y, door_symbol):
     max_distance = TILE_SIZE * 1.2
     nearest_door = None
     nearest_distance = max_distance
 
     for row_idx, row in enumerate(WORLD_MAP):
         for col_idx, cell in enumerate(row):
-            if cell != "D":
+            if cell != door_symbol:
                 continue
 
             door_x, door_y = cell_center(col_idx, row_idx)
@@ -76,8 +76,16 @@ def get_near_security_door(player_x, player_y):
     return nearest_door
 
 
-def teleport_through_security_door(player_x, player_y):
-    door = get_near_security_door(player_x, player_y)
+def get_near_security_door(player_x, player_y):
+    return get_near_door(player_x, player_y, "D")
+
+
+def get_near_laboratory_door(player_x, player_y):
+    return get_near_door(player_x, player_y, "8")
+
+
+def teleport_through_door(player_x, player_y, door_symbol):
+    door = get_near_door(player_x, player_y, door_symbol)
     if door is None:
         return player_x, player_y
 
@@ -101,6 +109,14 @@ def teleport_through_security_door(player_x, player_y):
         return first_x, first_y
 
     return player_x, player_y
+
+
+def teleport_through_security_door(player_x, player_y):
+    return teleport_through_door(player_x, player_y, "D")
+
+
+def teleport_through_laboratory_door(player_x, player_y):
+    return teleport_through_door(player_x, player_y, "8")
 
 def cast_ray(player_x, player_y, angle):
     depth = 0
@@ -386,6 +402,12 @@ def main():
     sec_window_texture = pg.image.load("assets/textures/sec_wall.png").convert()
     panel_texture = pg.image.load("assets/objects/sec_panel.png").convert_alpha()
     sec_door_texture = pg.image.load("assets/textures/Door_sec.png").convert()
+    lab_wall_texture = pg.image.load("assets/laboratory/lab_wall.png").convert()
+    lab_table_texture = pg.image.load("assets/laboratory/Table_wall.png").convert()
+    lab_wardrobe_texture = pg.image.load("assets/laboratory/wardrobe_wall.png").convert()
+    lab_wardrobe_2_texture = pg.image.load("assets/laboratory/lab_wardrobe_2.png").convert()
+    lab_hanger_texture = pg.image.load("assets/laboratory/hanger_wall.png").convert()
+    lab_door_texture = pg.image.load("assets/textures/Door_2.png").convert()
     door_left_texture = pg.image.load("assets/textures/Door_L.png").convert_alpha()
     door_right_texture = pg.image.load("assets/textures/Door_R.png").convert_alpha()
     heavy_door_texture = make_door_texture(door_left_texture, door_right_texture)
@@ -393,6 +415,12 @@ def main():
         "1": wall_texture,
         "2": sec_wall_texture,
         "3": sec_window_texture,
+        "4": lab_wall_texture,
+        "5": lab_table_texture,
+        "6": lab_wardrobe_texture,
+        "7": lab_hanger_texture,
+        "8": lab_door_texture,
+        "9": lab_wardrobe_2_texture,
         "D": sec_door_texture,
         "H": heavy_door_texture
     }
@@ -422,6 +450,7 @@ def main():
     flashlight_drain = 1.0
 
     font = pg.font.SysFont(None, 48)
+    interact_font = pg.font.SysFont("arial", 28)
 
     start_buton = pg.Rect(WIDTH // 2 - 100, 250, 200, 60)
     exit_buton = pg.Rect(WIDTH // 2 - 100, 330, 200, 60)
@@ -456,6 +485,8 @@ def main():
                 if game_status == "game" and event.key == pg.K_e:
                     if get_near_panel(player_x, player_y, panels) is not None:
                         heavy_door_open = True
+                    elif get_near_laboratory_door(player_x, player_y) is not None:
+                        player_x, player_y = teleport_through_laboratory_door(player_x, player_y)
                     else:
                         player_x, player_y = teleport_through_security_door(player_x, player_y)
                 if event.key == pg.K_f and flashlight_charge > 0:
@@ -620,9 +651,19 @@ def main():
             FLASHLIGHT_POWER
         )
 
-        if get_near_security_door(player_x, player_y) is not None or get_near_panel(player_x, player_y, panels) is not None:
+        interact_label = None
+        if get_near_panel(player_x, player_y, panels) is not None:
+            interact_label = "открыть дверь"
+        elif get_near_laboratory_door(player_x, player_y) is not None:
+            interact_label = "лаборатория"
+        elif get_near_security_door(player_x, player_y) is not None:
+            interact_label = "охрана"
+
+        if interact_label is not None:
             interact_text = font.render("E", True, (230, 230, 230))
-            screen.blit(interact_text, interact_text.get_rect(center=(WIDTH // 2, HEIGHT - 80)))
+            label_text = interact_font.render(interact_label, True, (230, 230, 230))
+            screen.blit(interact_text, interact_text.get_rect(center=(WIDTH // 2, HEIGHT - 95)))
+            screen.blit(label_text, label_text.get_rect(center=(WIDTH // 2, HEIGHT - 60)))
 
         pg.display.flip()
         
