@@ -17,13 +17,14 @@ offset_x = (WIDTH - MAP_W * TILE_SIZE) // 2
 offset_y = (HEIGHT - MAP_H * TILE_SIZE) // 2
 
 heavy_door_open = False
+server_door_open = False
 
 
 def is_blocking_cell(cell: str) -> bool:
     if cell == "H":
         return not heavy_door_open
 
-    return cell in ("1", "2", "3", "4", "5", "6", "7", "8", "9", "D")
+    return cell in ("1", "2", "3", "4", "5", "6", "7", "8", "9", "S", "W", "E", "P", "D")
 
 
 def is_wall_at_pixel(px: float, py: float) -> bool:
@@ -84,6 +85,10 @@ def get_near_laboratory_door(player_x, player_y):
     return get_near_door(player_x, player_y, "8")
 
 
+def get_near_server_door(player_x, player_y):
+    return get_near_door(player_x, player_y, "P")
+
+
 def teleport_through_door(player_x, player_y, door_symbol):
     door = get_near_door(player_x, player_y, door_symbol)
     if door is None:
@@ -117,6 +122,10 @@ def teleport_through_security_door(player_x, player_y):
 
 def teleport_through_laboratory_door(player_x, player_y):
     return teleport_through_door(player_x, player_y, "8")
+
+
+def teleport_through_server_door(player_x, player_y):
+    return teleport_through_door(player_x, player_y, "P")
 
 def cast_ray(player_x, player_y, angle):
     depth = 0
@@ -306,7 +315,7 @@ def create_panels(panel_texture):
     panels = []
     for row_idx, row in enumerate(WORLD_MAP):
         for col_idx, cell in enumerate(row):
-            if cell == "P":
+            if cell == "T":
                 panels.append({
                     "x": offset_x + (col_idx + 0.5) * TILE_SIZE,
                     "y": offset_y + (row_idx + 0.5) * TILE_SIZE,
@@ -371,6 +380,21 @@ def draw_object_sprite(screen, obj, player_x, player_y, angle, fov, wall_const, 
 
         column = scaled_sprite.subsurface((x, 0, 1, sprite_height))
         screen.blit(column, (screen_column, y_top))
+
+
+def draw_code_lock(screen, font, small_font, entered_code, has_error):
+    panel_rect = pg.Rect(0, 0, 280, 130)
+    panel_rect.center = (WIDTH // 2, HEIGHT // 2)
+    pg.draw.rect(screen, (18, 18, 18), panel_rect)
+    pg.draw.rect(screen, (170, 170, 170), panel_rect, 2)
+
+    code_text = font.render(" ".join(entered_code.ljust(4, "_")), True, (230, 230, 230))
+
+    screen.blit(code_text, code_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 10)))
+
+    if has_error:
+        error_text = small_font.render("неверный код", True, (220, 70, 70))
+        screen.blit(error_text, error_text.get_rect(center=(WIDTH // 2, panel_rect.bottom - 25)))
          
 def collides_circle(px: float, py: float, r: float) -> bool:
     points = [
@@ -387,7 +411,7 @@ def collides_circle(px: float, py: float, r: float) -> bool:
 
 
 def main():
-    global heavy_door_open
+    global heavy_door_open, server_door_open
 
     pg.init()
     screen = pg.display.set_mode((WIDTH, HEIGHT))
@@ -408,6 +432,10 @@ def main():
     lab_wardrobe_2_texture = pg.image.load("assets/laboratory/lab_wardrobe_2.png").convert()
     lab_hanger_texture = pg.image.load("assets/laboratory/hanger_wall.png").convert()
     lab_door_texture = pg.image.load("assets/textures/Door_2.png").convert()
+    server_wall_texture = pg.image.load("assets/servers/serv_wall.png").convert()
+    server_wall_1_texture = pg.image.load("assets/servers/serv_wall_1.png").convert()
+    server_shield_texture = pg.image.load("assets/servers/serv_shild.png").convert()
+    server_door_texture = pg.image.load("assets/servers/serv_door.png").convert()
     door_left_texture = pg.image.load("assets/textures/Door_L.png").convert_alpha()
     door_right_texture = pg.image.load("assets/textures/Door_R.png").convert_alpha()
     heavy_door_texture = make_door_texture(door_left_texture, door_right_texture)
@@ -421,6 +449,10 @@ def main():
         "7": lab_hanger_texture,
         "8": lab_door_texture,
         "9": lab_wardrobe_2_texture,
+        "S": server_wall_texture,
+        "W": server_wall_1_texture,
+        "E": server_shield_texture,
+        "P": server_door_texture,
         "D": sec_door_texture,
         "H": heavy_door_texture
     }
@@ -448,6 +480,10 @@ def main():
     flashlight_max_charge = 20.0
     flashlight_charge = flashlight_max_charge
     flashlight_drain = 1.0
+    server_pin_code = "0472"
+    server_pin_entered = ""
+    server_pin_active = False
+    server_pin_error_timer = 0.0
 
     font = pg.font.SysFont(None, 48)
     interact_font = pg.font.SysFont("arial", 28)
@@ -477,6 +513,33 @@ def main():
                 running = False
             #Тут я решил сделать обработку ESC
             if event.type == pg.KEYDOWN:
+                if server_pin_active:
+                    if event.key == pg.K_ESCAPE or event.key == pg.K_e:
+                        server_pin_active = False
+                        server_pin_entered = ""
+                    elif event.key == pg.K_BACKSPACE:
+                        server_pin_entered = server_pin_entered[:-1]
+                    elif event.key == pg.K_RETURN:
+                        if server_pin_entered == server_pin_code:
+                            server_door_open = True
+                            server_pin_active = False
+                            server_pin_entered = ""
+                        else:
+                            server_pin_entered = ""
+                            server_pin_error_timer = 1.0
+                    elif event.unicode.isdigit() and len(server_pin_entered) < 4:
+                        server_pin_entered += event.unicode
+                        server_pin_error_timer = 0.0
+                        if len(server_pin_entered) == 4:
+                            if server_pin_entered == server_pin_code:
+                                server_door_open = True
+                                server_pin_active = False
+                                server_pin_entered = ""
+                            else:
+                                server_pin_entered = ""
+                                server_pin_error_timer = 1.0
+                    continue
+
                 if event.key == pg.K_ESCAPE:
                     mouse_captured = not mouse_captured
                     pg.event.set_grab(mouse_captured)
@@ -485,6 +548,13 @@ def main():
                 if game_status == "game" and event.key == pg.K_e:
                     if get_near_panel(player_x, player_y, panels) is not None:
                         heavy_door_open = True
+                    elif get_near_server_door(player_x, player_y) is not None:
+                        if not server_door_open:
+                            server_pin_active = True
+                            server_pin_entered = ""
+                            server_pin_error_timer = 0.0
+                        else:
+                            player_x, player_y = teleport_through_server_door(player_x, player_y)
                     elif get_near_laboratory_door(player_x, player_y) is not None:
                         player_x, player_y = teleport_through_laboratory_door(player_x, player_y)
                     else:
@@ -493,6 +563,9 @@ def main():
                     flashlight_on = not flashlight_on
 
         #обработка клавиш
+        if server_pin_error_timer > 0:
+            server_pin_error_timer = max(0.0, server_pin_error_timer - dt)
+
         keys = pg.key.get_pressed()
         dir_x = math.cos(angle)
         dir_y = math.sin(angle)
@@ -654,6 +727,11 @@ def main():
         interact_label = None
         if get_near_panel(player_x, player_y, panels) is not None:
             interact_label = "открыть дверь"
+        elif get_near_server_door(player_x, player_y) is not None:
+            if server_door_open:
+                interact_label = "серверная"
+            else:
+                interact_label = "ввести код"
         elif get_near_laboratory_door(player_x, player_y) is not None:
             interact_label = "лаборатория"
         elif get_near_security_door(player_x, player_y) is not None:
@@ -664,6 +742,9 @@ def main():
             label_text = interact_font.render(interact_label, True, (230, 230, 230))
             screen.blit(interact_text, interact_text.get_rect(center=(WIDTH // 2, HEIGHT - 95)))
             screen.blit(label_text, label_text.get_rect(center=(WIDTH // 2, HEIGHT - 60)))
+
+        if server_pin_active:
+            draw_code_lock(screen, font, interact_font, server_pin_entered, server_pin_error_timer > 0)
 
         pg.display.flip()
         
