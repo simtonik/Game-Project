@@ -24,7 +24,7 @@ def is_blocking_cell(cell: str) -> bool:
     if cell == "H":
         return not heavy_door_open
 
-    return cell in ("1", "2", "3", "4", "5", "6", "7", "8", "9", "S", "W", "E", "P", "D")
+    return cell in ("1", "2", "3", "4", "5", "6", "7", "8", "9", "S", "W", "E", "P", "I", "X", "D")
 
 
 def is_wall_at_pixel(px: float, py: float) -> bool:
@@ -87,6 +87,10 @@ def get_near_laboratory_door(player_x, player_y):
 
 def get_near_server_door(player_x, player_y):
     return get_near_door(player_x, player_y, "P")
+
+
+def get_near_info_folder(player_x, player_y):
+    return get_near_door(player_x, player_y, "X")
 
 
 def teleport_through_door(player_x, player_y, door_symbol):
@@ -395,6 +399,15 @@ def draw_code_lock(screen, font, small_font, entered_code, has_error):
     if has_error:
         error_text = small_font.render("неверный код", True, (220, 70, 70))
         screen.blit(error_text, error_text.get_rect(center=(WIDTH // 2, panel_rect.bottom - 25)))
+
+
+def draw_folder_popup(screen, folder_image):
+    screen.blit(folder_image, folder_image.get_rect(center=(WIDTH // 2, HEIGHT // 2)))
+
+
+def draw_center_message(screen, font, message):
+    text = font.render(message, True, (230, 230, 230))
+    screen.blit(text, text.get_rect(center=(WIDTH // 2, HEIGHT // 2)))
          
 def collides_circle(px: float, py: float, r: float) -> bool:
     points = [
@@ -436,6 +449,10 @@ def main():
     server_wall_1_texture = pg.image.load("assets/servers/serv_wall_1.png").convert()
     server_shield_texture = pg.image.load("assets/servers/serv_shild.png").convert()
     server_door_texture = pg.image.load("assets/servers/serv_door.png").convert()
+    info_sklad_texture = pg.image.load("assets/info/Info_sklad.png").convert()
+    info_sklad_x_texture = pg.image.load("assets/info/Info_sklad_x.png").convert()
+    folder_image = pg.image.load("assets/info/folder_b53.png").convert_alpha()
+    folder_image = pg.transform.smoothscale(folder_image, (300, 400))
     door_left_texture = pg.image.load("assets/textures/Door_L.png").convert_alpha()
     door_right_texture = pg.image.load("assets/textures/Door_R.png").convert_alpha()
     heavy_door_texture = make_door_texture(door_left_texture, door_right_texture)
@@ -453,6 +470,8 @@ def main():
         "W": server_wall_1_texture,
         "E": server_shield_texture,
         "P": server_door_texture,
+        "I": info_sklad_texture,
+        "X": info_sklad_x_texture,
         "D": sec_door_texture,
         "H": heavy_door_texture
     }
@@ -463,8 +482,8 @@ def main():
     angle = 0.0
     rot_speed = 2.5
 
-    player_x = offset_x + 1.5 * TILE_SIZE
-    player_y = offset_y + 4.5 * TILE_SIZE
+    player_x = offset_x + 2.5 * TILE_SIZE
+    player_y = offset_y + 9.5 * TILE_SIZE
     speed = 250
     enemy = Enemy(offset_x + 18.5 * TILE_SIZE, offset_y + 3.5 * TILE_SIZE, math.pi)
 
@@ -484,6 +503,13 @@ def main():
     server_pin_entered = ""
     server_pin_active = False
     server_pin_error_timer = 0.0
+    folder_popup_timer = 0.0
+    folder_taken = False
+    folder_search_count = 0
+    folder_search_needed = 6
+    checked_info_folders = set()
+    center_message = ""
+    center_message_timer = 0.0
 
     font = pg.font.SysFont(None, 48)
     interact_font = pg.font.SysFont("arial", 28)
@@ -548,6 +574,17 @@ def main():
                 if game_status == "game" and event.key == pg.K_e:
                     if get_near_panel(player_x, player_y, panels) is not None:
                         heavy_door_open = True
+                    elif not folder_taken and get_near_info_folder(player_x, player_y) is not None:
+                        info_folder = get_near_info_folder(player_x, player_y)
+                        if info_folder not in checked_info_folders:
+                            checked_info_folders.add(info_folder)
+                            folder_search_count += 1
+                            if folder_search_count >= folder_search_needed:
+                                folder_popup_timer = 2.0
+                                folder_taken = True
+                            else:
+                                center_message = "тут ничего"
+                                center_message_timer = 2.0
                     elif get_near_server_door(player_x, player_y) is not None:
                         if not server_door_open:
                             server_pin_active = True
@@ -565,6 +602,10 @@ def main():
         #обработка клавиш
         if server_pin_error_timer > 0:
             server_pin_error_timer = max(0.0, server_pin_error_timer - dt)
+        if folder_popup_timer > 0:
+            folder_popup_timer = max(0.0, folder_popup_timer - dt)
+        if center_message_timer > 0:
+            center_message_timer = max(0.0, center_message_timer - dt)
 
         keys = pg.key.get_pressed()
         dir_x = math.cos(angle)
@@ -727,6 +768,12 @@ def main():
         interact_label = None
         if get_near_panel(player_x, player_y, panels) is not None:
             interact_label = "открыть дверь"
+        elif (
+            not folder_taken
+            and get_near_info_folder(player_x, player_y) is not None
+            and get_near_info_folder(player_x, player_y) not in checked_info_folders
+        ):
+            interact_label = "папка"
         elif get_near_server_door(player_x, player_y) is not None:
             if server_door_open:
                 interact_label = "серверная"
@@ -745,6 +792,12 @@ def main():
 
         if server_pin_active:
             draw_code_lock(screen, font, interact_font, server_pin_entered, server_pin_error_timer > 0)
+
+        if center_message_timer > 0:
+            draw_center_message(screen, font, center_message)
+
+        if folder_popup_timer > 0:
+            draw_folder_popup(screen, folder_image)
 
         pg.display.flip()
         
